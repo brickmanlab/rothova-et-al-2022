@@ -1,0 +1,131 @@
+---
+title: "01_preprocessing"
+author: "Martin Proks"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_print: paged
+    dev: png
+---
+
+```{r knitr, include = FALSE}
+DOCNAME = knitr::current_input()
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = FALSE,
+                      cache.path     = paste0("cache/", DOCNAME, "/"),
+                      cache.comments = TRUE,
+                      echo           = TRUE,
+                      error          = FALSE,
+                      fig.align      = "center",
+                      fig.path       = paste0("../reports/figures/", DOCNAME, "/"),
+                      fig.width      = 10,
+                      fig.height     = 8,
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+# Introduction
+
+In this notebook we load the raw counts from multiple batches and construct a Seurat object.
+
+```{bash, eval=F}
+wget "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE164464&format=file" \
+  -O ../data/raw/GSE164464.tar
+
+mkdir ../data/raw/counts && \
+tar -C ../data/raw/counts -xvf ../data/raw/GSE164464.tar && \
+gunzip ../data/raw/counts/*
+```
+
+# _in vivo_ & _in vitro_
+
+The code below renames the original files to the ones that match the metadata file.
+
+```{r, message=FALSE}
+library(Seurat)
+library(dplyr)
+library(readxl)
+```
+
+```{r}
+metadata <- as.data.frame(readxl::read_excel("../data/raw/metadata.xlsx")[, -1])
+rownames(metadata) <- metadata$Well_ID
+
+template <- readxl::read_excel("../data/raw/sc_geo_template.xlsx", skip = 30, n_max=67)[c("title", "processed data file")]
+files <- stringr::str_sort(list.files(path = "../data/raw/counts", pattern = ".txt", full.names = T), numeric = T)
+
+for (i in 1:nrow(template)) {
+  row <- template[i, ]
+  print(stringr::str_glue("Processing {row$title}"))
+
+  ab_file <- grep(row$`processed data file`, files, value=T)
+  ab_content <- read.table(ab_file)
+
+  new_columns <- metadata %>% filter(Amp_batch_ID == row$title)
+
+  colnames(ab_content) <- new_columns$Well_ID
+  write.table(ab_content, file = stringr::str_glue("../data/raw/counts/{row$title}.txt"), quote = F)
+
+  file.remove(ab_file)
+}
+```
+
+```{r}
+files <- paste0("../data/raw/counts/", unique(metadata$Amp_batch_ID), ".txt")
+counts <- do.call(cbind, lapply(files, read.table, stringsAsFactors = FALSE))
+
+adata <- CreateSeuratObject(counts = counts, project = "MARS-seq", meta.data = metadata)
+saveRDS(adata, "../data/processed/01_raw_counts.RDS")
+```
+
+## SB12
+
+```{r}
+metadata <- as.data.frame(readxl::read_excel("../data/raw/metadata_SB12.xlsx")[, -1])
+rownames(metadata) <- metadata$Well_ID
+
+template <- readxl::read_excel("../data/raw/sc_geo_template.xlsx", skip = 30, n_max=75)[c("title", "processed data file")]
+template <- template[template$title %in% unique(metadata$Amp_batch_ID), ]
+files <- stringr::str_sort(list.files(path = "../data/raw/counts", pattern = ".txt", full.names = T), numeric = T)
+
+for (i in 1:nrow(template)) {
+  row <- template[i, ]
+  print(stringr::str_glue("Processing {row$title}"))
+  
+  ab_file <- grep(row$`processed data file`, files, value=T)
+  ab_content <- read.table(ab_file)
+  
+  new_columns <- metadata %>% filter(Amp_batch_ID == row$title)
+  
+  colnames(ab_content) <- new_columns$Well_ID
+  write.table(ab_content, file = stringr::str_glue("../data/raw/counts/{row$title}.txt"), quote = F)
+  
+  file.remove(ab_file)
+}
+```
+
+```{r}
+files <- paste0("../data/raw/counts/", unique(metadata$Amp_batch_ID), ".txt")
+counts <- do.call(cbind, lapply(files, read.table, stringsAsFactors = FALSE))
+
+adata <- CreateSeuratObject(counts = counts, project = "MARS-seq", meta.data = metadata)
+saveRDS(adata, "../data/processed/06_rawcounts.rds")
+```
+
+# Session info
+
+```{r session-info, cache = FALSE}
+devtools::session_info()
+```

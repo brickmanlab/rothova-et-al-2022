@@ -1,0 +1,14 @@
+name: ml
+channels:
+  - conda-forge
+dependencies:
+  # mandatory for jupyter
+  - conda-forge::python=3.8
+  - conda-forge::ipykernel
+  - conda-forge::ipywidgets
+  - conda-forge::nodejs
+  - pip
+  - pip:
+    - pandas
+    - numpy
+    - xgboost

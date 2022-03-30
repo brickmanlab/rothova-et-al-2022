@@ -1,0 +1,217 @@
+---
+title: "06_vitro"
+author: "Martin Proks"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_glue: paged
+    dev: png
+---
+  
+```{r knitr, include = FALSE}
+DOCNAME = knitr::current_input()
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = FALSE,
+                      cache.path     = paste0("cache/", DOCNAME, "/"),
+                      cache.comments = TRUE,
+                      echo           = TRUE,
+                      error          = FALSE,
+                      fig.align      = "center",
+                      fig.path       = paste0("../reports/figures/", DOCNAME, "/"),
+                      fig.width      = 10,
+                      fig.height     = 8,
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+# Introduction
+
+```{r, message=FALSE}
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(dplyr)
+library(glue)
+
+randomSeed = 12345
+set.seed(seed=randomSeed)
+```
+
+```{r}
+raw_ann <- readRDS("../data/processed/06_rawcounts.rds")
+```
+
+# Quality control
+
+```{r qa-1}
+raw_ann[['percent.mito']] <- PercentageFeatureSet(raw_ann, pattern = "^mt-")
+raw_ann[['percent.ercc']] <- PercentageFeatureSet(raw_ann, pattern = "^ERCC-")
+raw_ann[['percent.ribo']] <- PercentageFeatureSet(raw_ann, pattern = "^Rp[ls]")
+```
+
+```{r qa-2}
+VlnPlot(raw_ann, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mito", "percent.ribo", "percent.ercc"),
+        group.by = "Stage", ncol = 5)
+```
+
+```{r qa-3}
+plot1 <- FeatureScatter(raw_ann, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "Stage")
+plot2 <- FeatureScatter(raw_ann, feature1 = "nFeature_RNA", feature2 = "percent.mito", group.by = "Stage")
+plot3 <- FeatureScatter(raw_ann, feature1 = "nFeature_RNA", feature2 = "percent.ercc", group.by = "Stage")
+plot4 <- FeatureScatter(raw_ann, feature1 = "percent.mito", feature2 = "percent.ercc", group.by = "Stage")
+CombinePlots(plots = list(plot1, plot2,plot3,plot4))
+```
+
+```{r}
+nbins <- 100
+min_cells <- 700
+max_cells <- 16500
+
+ggplot(raw_ann@meta.data, aes(x=nCount_RNA)) + 
+  geom_histogram(bins = nbins) + 
+  geom_vline(aes(xintercept=min_cells), linetype="dashed", color='red') + 
+  geom_vline(aes(xintercept=max_cells), linetype="dashed", color='red')
+```
+
+```{r}
+min_genes <- 500
+max_genes <- 4500
+
+ggplot(raw_ann@meta.data, aes(x=nFeature_RNA)) + 
+  geom_histogram(bins = nbins) + 
+  geom_vline(aes(xintercept=min_genes), linetype="dashed", color='red') +
+  geom_vline(aes(xintercept=max_genes), linetype="dashed", color='red')
+```
+
+```{r}
+ggplot(raw_ann@meta.data, aes(x=nCount_RNA, y=nFeature_RNA, color=percent.mito)) + 
+  geom_point() + 
+  scale_color_continuous(type = "viridis") + 
+  geom_vline(aes(xintercept=min_cells), linetype="dashed", color='red') +
+  geom_vline(aes(xintercept=max_cells), linetype="dashed", color='red') +
+  geom_hline(aes(yintercept=min_genes), linetype="dashed", color='red') +
+  geom_hline(aes(yintercept=max_genes), linetype="dashed", color='red')
+```
+
+# Filtering
+
+```{r filtering}
+glue("Before filtering: {nrow(raw_ann)} {ncol(raw_ann)}")
+
+# Remove ERCC genes
+raw_ann <- raw_ann[rownames(raw_ann)[grep(rownames(raw_ann), pattern = "ERCC-", invert = T)], ]
+
+# Remove Zero
+raw_ann <- raw_ann[, raw_ann$Stage != "Zero"]
+
+adata <- subset(raw_ann, subset =
+                    nFeature_RNA > min_genes & nFeature_RNA < max_genes &
+                    nCount_RNA > min_cells & nCount_RNA < max_cells &
+                    percent.ercc < 20
+                )
+
+glue("After filtering: {nrow(adata)} {ncol(adata)}")
+```
+
+```{r}
+VlnPlot(adata, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mito", "percent.ribo", "percent.ercc"),
+        group.by = "Stage", ncol = 5)
+```
+
+# Normalize
+
+```{r}
+adata <- NormalizeData(adata)
+```
+
+```{r}
+adata <- FindVariableFeatures(adata, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(adata), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(adata)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1
+plot2
+```
+
+```{r, message=F, echo=F}
+adata <- ScaleData(adata, features = rownames(adata))
+```
+
+# Cell Cycle
+
+The cell cycle genes for mouse were taken from https://github.com/satijalab/seurat/issues/462#issuecomment-387456657.
+
+```{r cc-estimation}
+cell_cycle <- readRDS("../data/external/mouse_cell_cycle_genes.rds")
+adata <- CellCycleScoring(adata, s.features = cell_cycle$s.genes, g2m.features = cell_cycle$g2m.genes, set.ident = F)
+```
+
+# PCA
+
+```{r pca}
+adata <- RunPCA(adata, features = VariableFeatures(object = adata))
+DimPlot(adata, reduction = "pca", group.by = "Stage")
+ElbowPlot(adata)
+```
+
+```{r clustering}
+adata <- FindNeighbors(adata, dims = 1:15)
+adata <- FindClusters(adata)
+adata <- RunUMAP(adata, dims = 1:15)
+```
+
+# Visualization
+
+```{r umap}
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "UMAP", group.by = "Stage")
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "UMAP")
+DimPlot(adata, reduction = "umap", group.by = "Phase")
+DimPlot(adata, reduction = "umap", group.by = "Batch")
+```
+
+```{r cell-cycle}
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "S"), cols.highlight = "blue") + ggtitle("S")
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "G2M"), cols.highlight = "green") + ggtitle("G2M")
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "G1"), cols.highlight = "red") + ggtitle("G1")
+```
+
+# Markers
+
+```{r}
+markers <- FindAllMarkers(adata, only.pos = T)
+markers_subset <- subset(markers, p_val_adj < 0.05 & abs(avg_logFC) > 0.75 )
+write.table(x = markers_subset, file = "06_vitro.markers.tsv", quote = F, sep = "\t", eol = "\n")
+```
+
+# Save session
+
+```{r save-session}
+saveRDS(adata, file = "../data/processed/06_vitro.RDS")
+
+write.csv(adata@meta.data, file = "../data/processed/06_vitro.metadata.csv")
+write.csv(adata@reductions$umap@cell.embeddings, file = "../data/processed/06_vitro.umap.csv")
+```
+
+# Session info
+
+```{r session-info, cache = FALSE}
+devtools::session_info()
+```

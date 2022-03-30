@@ -1,0 +1,85 @@
+---
+title: "06_vitro_markers"
+author: "Michaela Rothova"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_glue: paged
+    dev: png
+---
+
+# Load dataset
+
+```{r}
+library(Seurat)
+library(ggplot2)
+
+adata <- readRDS("../data/processed/06_vitro.RDS")
+```
+
+```{r}
+adata <- FindClusters(adata, resolution = 0.8, random.seed = 12345)
+```
+
+```{r}
+DimPlot(adata, group.by = 'Stage')
+DimPlot(adata, group.by = 'seurat_clusters')
+DimPlot(adata, group.by = 'Condition')
+```
+
+# Rename clusters
+
+```{r}
+new_cluster_names <- c(
+  "Org1","Org2","Org3", "SFD_Mid-Hg", "nEnd", "Org4", "Org5","Org6")
+tmp <- factor(adata$seurat_clusters, levels = levels(adata$seurat_clusters), labels = new_cluster_names)
+adata@meta.data['cluster_names'] <- tmp
+```
+
+```{r}
+DimPlot(adata, label = T, group.by = 'cluster_names')
+DimPlot(adata, group.by = 'Condition')
+```
+
+```{r}
+adata@meta.data %>% group_by(seurat_clusters) %>% summarize(n = n())
+```
+
+# Violin plots
+
+```{r, fig.height=10}
+Idents(adata) <- adata@meta.data$cluster_names
+VlnPlot(adata, features = c("Ino80c", "Tmem120a","Atp1b1","Sat1"), ncol = 2)
+```
+
+# Dotplots
+
+```{r}
+subset <- adata[, adata$cluster_names %in% c("nEnd", "Org3", "Org5")]
+DotPlot(subset, features = c("Sepp1","Nepn","Id2","Krt19","Slc39a8","Ctsh","Trap1a","Dppa5a","Lgals9","Clic3")) + theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+# Violin plots
+
+```{r, fig.height=7}
+VlnPlot(subset, features = c("Dppa5a", "Lgals9", "Clic3", "Sepp1","Nepn","Id2","Krt19","Slc39a8", "Ctsh","Trap1a")) + theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+# Feature plots
+
+```{r}
+FeaturePlot(adata, features = c("Ctsh","Trap1a"), order = T, blend=F)
+```
+

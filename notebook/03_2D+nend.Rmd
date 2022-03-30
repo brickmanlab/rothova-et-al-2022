@@ -1,0 +1,166 @@
+---
+title: "03_2D+nend"
+author: "Martin Proks"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_glue: paged
+    dev: png
+---
+
+```{r knitr, include = FALSE}
+DOCNAME = knitr::current_input()
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = FALSE,
+                      cache.path     = paste0("cache/", DOCNAME, "/"),
+                      cache.comments = TRUE,
+                      echo           = TRUE,
+                      error          = FALSE,
+                      fig.align      = "center",
+                      fig.path       = paste0("../reports/figures/", DOCNAME, "/"),
+                      fig.width      = 10,
+                      fig.height     = 8,
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+# Introduction
+
+Figure 6b
+
+```{r, message=FALSE}
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(dplyr)
+library(glue)
+
+randomSeed = 12345
+set.seed(seed=randomSeed)
+```
+
+```{r}
+adata <- readRDS("../data/processed/01_raw_counts.RDS")
+```
+
+# Quality control
+
+```{r qa-1}
+adata[["percent.mito"]] <- PercentageFeatureSet(adata, pattern = "^mt-")
+adata[["percent.ercc"]] <- PercentageFeatureSet(adata, pattern = "^ERCC-")
+
+adata@meta.data <- adata@meta.data %>% dplyr::rename(nUMI = nCount_RNA, nGene = nFeature_RNA)
+```
+
+```{r filtering}
+mat_counts <- GetAssayData(object = adata, assay="RNA", slot = "counts") %>% as.matrix
+
+# Remove Zero
+all_zeros <- adata@meta.data[adata@meta.data$Day == "Zero", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% all_zeros]
+
+# Remove ERCC
+ercc.genes <- grep(pattern = "^ERCC-", x = rownames(mat_counts), ignore.case = TRUE)
+mat_counts <- mat_counts[!rownames(mat_counts) %in% rownames(mat_counts)[ercc.genes], ]
+
+# Doublets
+e7_doublet <- pbmc@meta.data[pbmc@meta.data$Day == "E7_5_doublets", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% e7_doublet]
+
+e8_doublets <- pbmc@meta.data[pbmc@meta.data$Day == "E8_5_doublets", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% e8_doublets]
+
+e9_doublets <- pbmc@meta.data[pbmc@meta.data$Day == "E9_5_doublets", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% e9_doublets]
+
+useless_sox <- pbmc@meta.data[pbmc@meta.data$Condition == "E8_5_Sox17_y_0726", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% useless_sox]
+
+in_vivo <- pbmc@meta.data[pbmc@meta.data$Source == "In_vivo", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% in_vivo]
+
+ESCs <- pbmc@meta.data[pbmc@meta.data$Day == "ESC_2iLIF", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% ESCs]
+
+ESC <- pbmc@meta.data[pbmc@meta.data$Day == "2iLIF", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% ESC]
+
+Mars2 <- pbmc@meta.data[pbmc@meta.data$SubGroup == "Mars2", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% Mars2]
+
+Protocol_2 <- pbmc@meta.data[pbmc@meta.data$Protocol == "3D_ESC", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% Protocol_2]
+
+Protocol_3 <- pbmc@meta.data[pbmc@meta.data$Protocol == "2D_ESC_PI3K", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% Protocol_3]
+
+Protocol_4 <- pbmc@meta.data[pbmc@meta.data$Protocol == "3D_VFG", "Well_ID"]
+mat_counts <- mat_counts[, !colnames(mat_counts) %in% Protocol_4]
+```
+
+```{r}
+meta <- adata@meta.data
+adata <- NULL
+adata <- CreateSeuratObject(counts = mat_counts, meta.data = meta)
+```
+
+# Batch correction
+
+```{r batch-correction}
+adata <- NormalizeData(adata)
+adata <- FindVariableFeatures(adata)
+adata <- RunFastMNN(object.list = SplitObject(adata, split.by = "Batch"))
+```
+
+# Dimension reduction
+
+```{r dimension-reduction}
+adata <- RunUMAP(adata, reduction="mnn", seed.use=randomSeed, dims=1:20)
+adata <- FindNeighbors(adata, reduction="mnn", dims = 1:20)
+adata <- FindClusters(adata, random.seed = randomSeed, resolution = 0.3)
+```
+
+```{r}
+adata[['cluster_names']] <- recode(adata$seurat_clusters, 
+       `0` = "D4-D6a",
+       `1` = "D5-D6b",
+       `2` = "D6",
+       `3` = "D5-D6a",
+       `4` = "D4a",
+       `5` = "D4b",
+       `6` = "D4-D6b",
+       `7` = "D5-D6c",
+)
+```
+
+# Visualization
+
+```{r umap}
+DimPlot(adata, group.by = "Protocol")
+DimPlot(adata, group.by = "seurat_clusters")
+DimPlot(adata, group.by = "cluster_names")
+```
+
+# Save session
+
+```{r save-session}
+saveRDS(adata, file = "../data/processed/03_2D+nend.rds")
+```
+
+# Session info
+
+```{r session-info, cache = FALSE}
+devtools::session_info()
+```

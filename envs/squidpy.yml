@@ -1,0 +1,19 @@
+name: squidpy
+channels:
+  - conda-forge
+dependencies:
+  # mandatory for jupyter
+  - conda-forge::python=3.8
+  - conda-forge::ipykernel
+  - conda-forge::ipywidgets
+  - conda-forge::nodejs
+  - pip
+  - pip
+  - pip:
+    - astropy>=4.1
+    - esda>=2.3.1
+    - libpysal>=4.3.0
+    - numba==0.52.0
+    - read_roi==1.6.0
+    - shapely==1.7.1
+    - squidpy==1.0.0

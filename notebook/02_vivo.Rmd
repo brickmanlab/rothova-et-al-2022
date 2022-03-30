@@ -1,0 +1,191 @@
+---
+title: "02_vivo"
+author: "Martin Proks"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_glue: paged
+    dev: png
+---
+
+```{r knitr, include = FALSE}
+DOCNAME = knitr::current_input()
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = FALSE,
+                      cache.path     = paste0("cache/", DOCNAME, "/"),
+                      cache.comments = TRUE,
+                      echo           = TRUE,
+                      error          = FALSE,
+                      fig.align      = "center",
+                      fig.path       = paste0("../reports/figures/", DOCNAME, "/"),
+                      fig.width      = 10,
+                      fig.height     = 8,
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+# Introduction
+
+```{r, message=FALSE}
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(dplyr)
+library(glue)
+
+randomSeed = 12345
+set.seed(seed=randomSeed)
+```
+
+```{r}
+adata <- readRDS("../data/processed/01_raw_counts.RDS")
+```
+
+# Quality control
+
+```{r qa-1}
+adata[["percent.mito"]] <- PercentageFeatureSet(adata, pattern = "^mt-")
+adata[["percent.ercc"]] <- PercentageFeatureSet(adata, pattern = "^ERCC-")
+
+adata@meta.data <- adata@meta.data %>% dplyr::rename(nUMI = nCount_RNA, nGene = nFeature_RNA)
+```
+
+```{r qa-2}
+VlnPlot(adata, ncol = 2, features = c("nGene", "nUMI", "percent.mito", "percent.ercc"), pt.size = 0.1)
+VlnPlot(adata, ncol = 2, group.by = "Day", features = c("nUMI", "nGene", "percent.mito", "percent.ercc"), pt.size = 0.1)
+```
+
+```{r qa-3}
+plot1 <- FeatureScatter(adata, feature1 = "nUMI", feature2 = "nGene", group.by = "Day")
+plot2 <- FeatureScatter(adata, feature1 = "nGene", feature2 = "percent.mito", group.by = "Day")
+plot3 <- FeatureScatter(adata, feature1 = "nGene", feature2 = "percent.ercc", group.by = "Day")
+plot4 <- FeatureScatter(adata, feature1 = "percent.mito", feature2 = "percent.ercc", group.by = "Day")
+CombinePlots(plots = list(plot1, plot2,plot3,plot4))
+```
+
+# Filtering
+
+Filtering of the dataset was performed previously. Therefore, we make a subset here.
+
+```{r filtering}
+glue("Before filtering: {nrow(adata)} {ncol(adata)}")
+
+keep_cells <- read.table("../data/processed/02_filtered_cells.txt")$V1
+adata <- adata[, keep_cells]
+
+# Remove ERCC genes
+adata <- adata[rownames(adata)[grep(rownames(adata), pattern = "ERCC-", invert = T)], ]
+
+# Remove Zero
+adata <- adata[, adata$Day != "Zero"]
+
+# Remove useless Sox17
+adata <- adata[, adata$Condition != "E8_5_Sox17_y_0726"]
+
+# Keep only in vivo
+adata <- adata[, adata$Source == "In_vivo"]
+
+glue("After filtering: {nrow(adata)} {ncol(adata)}")
+```
+
+# Batch correction
+
+```{r batch-correction}
+adata <- NormalizeData(adata)
+adata <- FindVariableFeatures(adata)
+adata <- RunFastMNN(object.list = SplitObject(adata, split.by = "Batch"))
+```
+
+# Cell Cycle
+
+The cell cycle genes for mouse were taken from https://github.com/satijalab/seurat/issues/462#issuecomment-387456657.
+
+```{r cc-estimation}
+cell_cycle <- readRDS("../data/external/mouse_cell_cycle_genes.rds")
+adata <- CellCycleScoring(adata, s.features = cell_cycle$s.genes, g2m.features = cell_cycle$g2m.genes, set.ident = F)
+```
+
+# Dimension reduction
+
+```{r dimension-reduction}
+adata <- RunUMAP(adata, reduction="mnn", seed.use=randomSeed, dims=1:20)
+adata <- FindNeighbors(adata, reduction="mnn", dims = 1:20)
+adata <- FindClusters(adata, random.seed = randomSeed, resolution = 1.4)
+```
+
+```{r}
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "UMAP")
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "Day", group.by = "Day")
+```
+
+```{r}
+adata <- adata[, adata$seurat_clusters != "18"]
+
+adata[['cluster_names']] <- recode(adata$seurat_clusters, 
+       `0` = "FP",
+       `1` = "Foregut",
+       `2` = "DE2",
+       `3` = "Liver",
+       `4` = "Node",
+       `5` = "AVE",
+       `6` = "Hindgut1",
+       `7` = "Midgut",
+       `8` = "ExVE1",
+       `9` = "DE1",
+       `10` = "Hindgut2",
+       `11` = "Notochord",
+       `12` = "ExVE2",
+       `13` = "PS2",
+       `14` = "EmVE",
+       `15` = "InterVE",
+       `16` = "PS1",
+       `17` = "PE"
+)
+adata <- adata[, !colnames(adata) %in% c('W911', 'W4426', 'W12583')]
+```
+
+# Visualization
+
+```{r umap}
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "UMAP", group.by = "Day")
+DimPlot(adata, label = TRUE, reduction = "umap", plot.title = "UMAP", group.by = "cluster_names")
+DimPlot(adata, reduction = "umap", group.by = "Phase")
+DimPlot(adata, reduction = "umap", group.by = "Batch")
+DimPlot(adata, reduction = "umap", group.by = "Day")
+```
+
+```{r cell-cycle}
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "S"), cols.highlight = "blue") + ggtitle("S")
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "G2M"), cols.highlight = "green") + ggtitle("G2M")
+DimPlot(adata, cells.highlight = WhichCells(adata, expression = Phase == "G1"), cols.highlight = "red") + ggtitle("G1")
+```
+
+# Save session
+
+```{r save-session}
+saveRDS(adata, file = "../data/processed/02_vivo.RDS")
+
+write.csv(adata@meta.data, file = "../data/processed/02_metadata.csv")
+write.csv(rownames(adata), file = "../data/processed/02_genes.csv")
+write.csv(adata@reductions$mnn@cell.embeddings, file = "../data/processed/02_mnn.csv")
+write.csv(adata@reductions$umap@cell.embeddings, file = "../data/processed/02_umap.csv")
+write.csv(adata@assays$RNA@var.features, file = "../data/processed/02_hvgs.csv")
+```
+
+# Session info
+
+```{r session-info, cache = FALSE}
+devtools::session_info()
+```

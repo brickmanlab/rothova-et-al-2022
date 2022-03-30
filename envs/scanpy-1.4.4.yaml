@@ -1,0 +1,28 @@
+name: scanpy-1.4.4
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # mandatory for jupyter
+  - conda-forge::python=3.7
+  - conda-forge::ipykernel
+  - conda-forge::ipywidgets
+  - conda-forge::nodejs
+  - pip
+  - pip:
+    - anndata==0.7.1
+    - fa2==0.3.5
+    - h5py==2.9.0
+    - loompy==2.0.17
+    - numpy==1.17.3
+    - pandas==0.25.3
+    - scanpy==1.4.4.post1
+    - scikit-learn==0.22.1
+    - numba==0.45.0
+    - llvmlite==0.31.0
+    - mnnpy==0.1.9.5
+    - cython==0.29.14
+    - python-igraph==0.9.6
+    - umap-learn==0.3.10
+    - llvmlite==0.30

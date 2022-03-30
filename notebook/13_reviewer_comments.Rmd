@@ -1,0 +1,172 @@
+---
+title: "13 - Reviewer's comments"
+author: "Martin Proks"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_print: paged
+    dev: 'pdf'
+---
+
+```{r knitr, include = FALSE}
+DOCNAME = knitr::current_input()
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = FALSE,
+                      cache.path     = paste0("cache/", DOCNAME, "/"),
+                      cache.comments = TRUE,
+                      echo           = TRUE,
+                      error          = FALSE,
+                      fig.align      = "center",
+                      fig.path       = paste0("../reports/figures/", DOCNAME, "/"),
+                      fig.width      = 10,
+                      fig.height     = 8,
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+# Introduction
+
+```{r}
+library(SeuratDisk)
+library(Seurat)
+library(ggplot2)
+library(ggsignif)
+library(dplyr)
+library(reshape2)
+```
+
+## Fig. 3C
+
+```{r}
+map_significance <- function(pval, asterisk, pos_only){
+
+  if (pval < 0.001) return (ifelse(asterisk, "***", pval))
+  if (pval < 0.01) return (ifelse(asterisk, "**", pval))
+  if (pval < 0.05) return (ifelse(asterisk, "*", pval))
+
+  return (ifelse(pos_only, NA, "ns"))
+}
+
+get_non_zero_median_mat <- function(p_norm) {
+  f_norm <- GetAssayData(p_norm, slot = 'data') %>% as.matrix
+  f_non_zero_medians <- apply(f_norm, 1, FUN = function(x){
+    return (median(x[x!= 0]))
+  })
+  f_res <- f_norm / f_non_zero_medians
+  f_res[is.na(f_res)] <- 0
+  return (f_res)
+}
+
+plot_density <- function(p_norm, p_list, p_clusters) {
+  f_res = NULL
+  f_norm_mat <- get_non_zero_median_mat(p_norm)
+  p_list <- tools::toTitleCase(tolower(p_list)) # rename gene names
+  f_gene_list <- p_list[which(p_list %in% rownames(f_norm_mat))]
+  for (f_cluster in p_clusters) {
+    f_wells <- rownames(p_norm@meta.data[p_norm@meta.data$cluster_names == f_cluster, ])
+    f_tmp_mat <- f_norm_mat[f_gene_list, f_wells]
+    f_expr <- colSums(f_tmp_mat)
+    f_tmp_df <- data.frame("cluster" = replicate(length(f_expr), f_cluster), "value" = unname(f_expr), "well_id" = names(f_expr))
+    f_res <- rbind(f_res, f_tmp_df)
+  }
+  f_res$cluster <- factor(f_res$cluster, levels=levels(p_norm$cluster_names))
+  f_res$well_id <- as.factor(f_res$well_id)
+
+  p <- ggplot(f_res, aes(x=cluster, y=value, fill=cluster)) + 
+    geom_boxplot() +
+    geom_signif(comparisons = list(c("AVE", "InterVE"), c("InterVE", "DE2")),
+                textsize = 5,
+                vjust = .5,
+                tip_length = 0,
+                test = 'wilcox.test',
+                step_increase = .1,
+                map_signif_level=function(x) { return(map_significance(x, T, T)) }
+    )
+
+  return (p)
+}
+```
+
+```{r}
+rothova <- readRDS("../data/processed/02_vivo.RDS")
+```
+
+```{r}
+rothova_sub <- subset(x = rothova, subset = (cluster_names %in% c("ExVE1","ExVE2","EmVE","AVE","InterVE", "DE1", "DE2", "Hindgut1","Hindgut2","Midgut","Foregut","Liver")))
+rothova_sub$cluster_names <- factor(rothova_sub$cluster_names, levels = c("ExVE1","ExVE2","EmVE","AVE","InterVE", "DE1", "DE2", "Hindgut1","Hindgut2","Midgut","Foregut","Liver"))
+
+pathways <- c('Lysosome.txt', 'smad.txt', 'genes_TSNE-lipid-metabolism.txt', 
+              'retinoid-metabolism.txt', 'pathway-hippo.txt', 'pathway-fgf.txt',
+              'basement membrane.txt', 'pathway-Wnt-canonical.txt', 'pathway-smoothened.txt')
+for (pathway in pathways) {
+  pathway <- glue::glue("../data/external/genelists_Jan2020/{pathway}")
+  my_gene_list <- scan(pathway, what="", sep = ',')
+  my_gene_list <- gsub("\\s", "", my_gene_list)
+  
+  p <- plot_density(rothova_sub, my_gene_list, 
+              c("ExVE1","ExVE2","EmVE","AVE","InterVE", "DE1", "DE2", "Hindgut1","Hindgut2","Midgut","Foregut","Liver")
+  )
+  p <- p + scale_fill_manual(values=c(rep("#dab61f", 4), "#5ea54d", rep("#4a6caa", 7))) +
+           labs(x = '', y = 'Gene expression [AU]') + 
+           theme_classic() +
+           theme(legend.position = "none")
+  p <- p + ggtitle(pathway)
+  print(p)
+}
+```
+
+## Supp. Fig 7
+
+Rothova et al
+
+```{r}
+plot_vln_sig <- function(seu, p_gene, p_clusters) {
+  f_res = NULL
+  f_norm_mat <- get_non_zero_median_mat(seu)
+  for (f_cluster in p_clusters) {
+    f_tmp <- as.data.frame(f_norm_mat[p_gene, seu$cluster_names == f_cluster])
+    f_tmp['cluster'] <- f_cluster
+    f_res <- rbind(f_res, f_tmp)
+  }
+  f_res$cluster <- factor(f_res$cluster, levels=levels(seu$cluster_names))
+  colnames(f_res) <- c('value', 'cluster')
+
+  p <- ggplot(f_res, aes(x=cluster, y=value, fill=cluster)) +
+    geom_violin() +
+    geom_signif(comparisons = list(c('DE2', 'EmVE'), c('DE2', 'ExVE1'),
+                                   c('DE2', 'ExVE2'), c('DE2', 'AVE'),
+                                   c('DE1', 'EmVE'), c('DE1', 'ExVE1'),
+                                   c('DE1', 'ExVE2'), c('DE1', 'AVE')),
+                textsize = 5,
+                vjust = .5,
+                tip_length = 0,
+                test = 'wilcox.test',
+                step_increase = .1,
+                map_signif_level=function(x) { return(map_significance(x, T, T)) }
+    )
+
+  return (p)
+}
+
+Idents(rothova) <- 'cluster_names'
+genes <- c("Cxcr4", "Kit", "Sox17", "Gata6")
+for (gene in genes) {
+  p <- plot_vln_sig(rothova, gene, levels(rothova$cluster_names)) + 
+           labs(x = '', y = 'Gene expression [AU]') + 
+           theme_classic() +
+           theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  print(p)
+}
+```

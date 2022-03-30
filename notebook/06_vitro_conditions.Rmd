@@ -1,0 +1,117 @@
+---
+title: "06_vitro_conditions"
+author: "Michaela Rothova"
+date: '`r Sys.Date()`'
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding,
+                        output_format='all',
+                        output_dir='../reports/')})
+output:
+  # To create PDF report, uncomment below
+  #pdf_document:
+  #  toc: yes
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    df_glue: paged
+    dev: png
+---
+
+# Load dataset
+
+```{r}
+library(Seurat)
+library(ggplot2)
+
+adata <- readRDS("../data/processed/06_vitro.RDS")
+```
+
+# Split by conditions
+
+```{r}
+adata <- SplitObject(adata, split.by = "Stage")
+```
+
+# Reanalyze in each subset
+
+```{r}
+process_subset <- function(data) {
+  data <- NormalizeData(data)
+  data <- FindVariableFeatures(data)
+  data <- RunPCA(data, npcs = 30, seed.use = 12345)
+  data <- FindNeighbors(data,  dims = 1:20)
+  data <- FindClusters(data, random.seed = 12345, resolution = 0.8)
+  return(data)
+}
+```
+
+```{r}
+adata <- lapply(adata, FUN = process_subset)
+```
+
+## SFD_mid-hg
+
+Before renaming
+
+```{r fig.height= 5, fig.width=5}
+DimPlot(adata$`SFD_mid-hg`, group.by = 'seurat_clusters')
+```
+
+```{r}
+new_cluster_names <- c("SFD_mid-hg_1",	"SFD_mid-hg_2")
+
+tmp <- factor(adata$`SFD_mid-hg`$seurat_clusters, levels = levels(adata$`SFD_mid-hg`$seurat_clusters), labels = new_cluster_names)
+adata$`SFD_mid-hg`@meta.data['cluster_names'] <- tmp
+```
+
+After renaming
+
+```{r}
+DimPlot(adata$`SFD_mid-hg`, group.by = 'cluster_names')
+```
+
+## SFD_org
+
+Before renaming
+
+```{r fig.height= 5, fig.width=5}
+DimPlot(adata$SFD_org, group.by = 'seurat_clusters')
+```
+
+```{r}
+new_cluster_names <- c("SFD_org_1",	"SFD_org_2","SFD_org_3","SFD_org_4","SFD_org_5")
+
+tmp <- factor(adata$SFD_org$seurat_clusters, levels = levels(adata$SFD_org$seurat_clusters), labels = new_cluster_names)
+adata$SFD_org@meta.data['cluster_names'] <- tmp
+```
+
+After renaming
+
+```{r}
+DimPlot(adata$SFD_org, group.by = 'cluster_names')
+```
+
+## nEnd
+
+Before renaming
+
+```{r fig.height= 5, fig.width=5}
+p1 <- DimPlot(adata$nEnd, group.by = 'seurat_clusters')
+p1
+```
+
+```{r}
+new_cluster_names <- c("nEnd_1",	"nEnd_2")
+
+tmp <- factor(adata$nEnd$seurat_clusters, levels = levels(adata$nEnd$seurat_clusters), labels = new_cluster_names)
+adata$nEnd@meta.data['cluster_names'] <- tmp
+```
+
+After renaming
+
+```{r}
+DimPlot(adata$nEnd, group.by = 'cluster_names')
+```
